@@ -223,12 +223,11 @@ watch_dirs:
 ## Roadmap
 
 - 🎵 **MusicBrainz API integration** - Automatic label and release date fetching
-- 🎶 **MP3 support** - Expand beyond AIFF to handle MP3 files and metadata
 - 📝 **Metadata writing** - Write enriched data back to audio files
 - 🔄 **Daemon mode** - Background processing of new files
 - 🎚️ **Additional APIs** - Discogs, Last.fm integration for better coverage
 - 📊 **Collection statistics** - Detailed analytics about your music library
-- 🎧 **Format expansion** - FLAC, WAV, and other audio format support
+- 🎧 Format expansion - MP3, FLAC, WAV, and other audio format support
 
 ## Contributing
 
