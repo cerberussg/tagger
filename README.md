@@ -243,4 +243,4 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-For issues, feature requests, or questions about D&B metadata patterns, please open an issue on GitHub.
+For issues, feature requests, or questions about metadata patterns, please open an issue on GitHub.
