@@ -9,12 +9,12 @@ Many audio files, especially AIFF vinyl rips and older digital collections, lack
 - **Missing record label information** - Critical for genre identification and collection organization
 - **No release dates** - Important for chronological organization and historical context  
 - **Inconsistent metadata** - Makes it difficult to search and filter in DJ software like RekordBox
-- **Complex filename patterns** - D&B files often use intricate naming conventions that are hard to parse automatically
+- **Complex filename patterns** - Files often use intricate naming conventions that are hard to parse automatically
 
 Tagger solves these problems by:
 - **Intelligently parsing filenames** to extract artist and track information
 - **Identifying files that need metadata enrichment** vs. those already properly tagged
-- **Handling complex D&B naming patterns** with multiple hyphens and catalog numbers
+- **Handling complex naming patterns** with multiple hyphens and catalog numbers
 - **Generating detailed reports** for edge cases that need manual attention
 - **Preparing for API integration** to automatically fetch missing label and release data
 
