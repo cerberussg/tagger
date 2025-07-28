@@ -183,7 +183,7 @@ Recommendation: 92.0% of your collection could benefit from metadata enrichment
 
 ### Filename Patterns Supported
 
-The tool intelligently handles various D&B naming conventions:
+The tool intelligently handles various music naming conventions:
 
 - **1 Hyphen:** `Artist - Title.aiff`
 - **2 Hyphens:** `Artist - Album - Title.aiff`
