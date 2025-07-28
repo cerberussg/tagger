@@ -34,6 +34,8 @@ func init() {
     rootCmd.PersistentFlags().Bool("verbose", false, "verbose output")
     rootCmd.PersistentFlags().Bool("dry-run", false, "show what would be done without making changes")
 
+    rootCmd.CompletionOptions.DisableDefaultCmd = true
+
     viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
     viper.BindPFlag("dry-run", rootCmd.PersistentFlags().Lookup("dry-run"))
 }

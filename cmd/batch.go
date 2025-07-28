@@ -512,21 +512,6 @@ func cleanTrackPrefix(name string) string {
     return strings.TrimSpace(name)
 }
 
-// cleanArtistName removes common prefixes from artist names (kept for compatibility)
-func cleanArtistName(artist string) string {
-    return strings.TrimSpace(artist)
-}
-
-// cleanTitle removes common suffixes and cleans up title
-func cleanTitle(title string) string {
-    // Remove file format indicators that might have slipped through
-    title = strings.TrimSuffix(title, ".mp3")
-    title = strings.TrimSuffix(title, ".wav") 
-    title = strings.TrimSuffix(title, ".flac")
-    
-    return strings.TrimSpace(title)
-}
-
 // generateHTMLReport creates an HTML file showing edge cases with links to file locations
 func generateHTMLReport(edgeCases map[string][]string, outputPath string) error {
     file, err := os.Create(outputPath)
