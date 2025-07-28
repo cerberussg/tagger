@@ -1,6 +1,6 @@
 # Tagger
 
-A CLI tool for analyzing and enriching audio metadata, currently supporting AIFF files with plans to expand to additional formats. Specifically designed for drum & bass collections but supporting all electronic music genres.
+A CLI tool for analyzing and enriching audio metadata, currently supporting AIFF files with plans to expand to additional formats. Specifically designed for DJs to maintain collections but anyone is welcome.
 
 ## Problem Solved
 
