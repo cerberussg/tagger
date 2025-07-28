@@ -1,6 +1,6 @@
 package main
 
-import "aiff-tagger/cmd"
+import "github.com/cerberussg/tagger/cmd"
 
 func main() {
     cmd.Execute()

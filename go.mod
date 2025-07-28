@@ -1,4 +1,4 @@
-module aiff-tagger
+module github.com/cerberussg/tagger
 
 go 1.21
 
