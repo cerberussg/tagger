@@ -9,9 +9,9 @@ import (
 var versionCmd = &cobra.Command{
     Use:   "version",
     Short: "Print version information",
-    Long:  "Print the version number of aiff-tagger",
+    Long:  "Print the version number of tagger",
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Println("aiff-tagger v0.1.0")
+        fmt.Println("tagger v0.1.0")
         fmt.Println("Audio metadata enrichment tool")
         fmt.Println("Built for finding Record Label, Release Date, and Genre in AIFF files")
     },

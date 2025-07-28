@@ -20,9 +20,9 @@ var batchCmd = &cobra.Command{
 metadata with record label, release date, and genre information.
 
 Examples:
-  aiff-tagger batch ~/Music/DnB
-  aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
-  aiff-tagger batch . --verbose`,
+  tagger batch ~/Music/DnB
+  tagger batch ~/Downloads/new-releases --genre house --dry-run
+  tagger batch . --verbose`,
     Args: cobra.ExactArgs(1),
     Run:  runBatch,
 }

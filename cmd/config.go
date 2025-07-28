@@ -29,8 +29,8 @@ Available keys:
   watch_dirs                   - Comma-separated list of directories to watch
 
 Examples:
-  aiff-tagger config set api.musicbrainz.rate_limit 15
-  aiff-tagger config set watch_dirs "~/Music/DnB,~/Downloads"`,
+  tagger config set api.musicbrainz.rate_limit 15
+  tagger config set watch_dirs "~/Music/DnB,~/Downloads"`,
     Args: cobra.ExactArgs(2),
     Run:  runConfigSet,
 }
@@ -42,8 +42,8 @@ var configShowCmd = &cobra.Command{
 shows all settings.
 
 Examples:
-  aiff-tagger config show
-  aiff-tagger config show api.musicbrainz.rate_limit`,
+  tagger config show
+  tagger config show api.musicbrainz.rate_limit`,
     Args: cobra.MaximumNArgs(1),
     Run:  runConfigShow,
 }
