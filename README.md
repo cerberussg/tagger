@@ -232,7 +232,7 @@ watch_dirs:
 
 ## Contributing
 
-This tool is designed specifically for drum & bass collections but welcomes contributions for:
+This tool is designed specifically for music collections but welcomes contributions for:
 - Additional filename pattern support
 - New music databases integration
 - Performance improvements
