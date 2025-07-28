@@ -17,19 +17,20 @@ var batchCmd = &cobra.Command{
     Use:   "batch <folder>",
     Short: "Process all AIFF files in a folder",
     Long: `Batch process all AIFF files in the specified folder, enriching
-metadata with record label, release date, and genre information.
+    metadata with record label, release date, and genre information.
 
-Examples:
-  aiff-tagger batch ~/Music/DnB
-  aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
-  aiff-tagger batch . --verbose`,
-    Args: cobra.ExactArgs(1),
-    Run:  runBatch,
+    Examples:
+    aiff-tagger batch ~/Music/DnB
+    aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
+    aiff-tagger batch . --verbose`,
+        Args: cobra.ExactArgs(1),
+        Run:  runBatch,
 }
 
 var (
-    genreHint string
-    recursive bool
+    genreHint   string
+    recursive   bool
+    htmlReport  string
 )
 
 func init() {
@@ -37,6 +38,7 @@ func init() {
 
     batchCmd.Flags().StringVarP(&genreHint, "genre", "g", "", "genre hint for better API matching (dnb, house, breakbeat, etc.)")
     batchCmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "process subdirectories recursively")
+    batchCmd.Flags().StringVar(&htmlReport, "html-report", "", "generate HTML report of edge cases (e.g., --html-report edge-cases.html)")
 }
 
 func runBatch(cmd *cobra.Command, args []string) {
@@ -82,7 +84,7 @@ func runBatch(cmd *cobra.Command, args []string) {
     var hasLabel int
     var errorCount int
     
-    // Edge case tracking
+    // Edge case tracking - store full paths instead of just filenames
     edgeCases := make(map[string][]string)
     
     // Process each file
@@ -101,10 +103,9 @@ func runBatch(cmd *cobra.Command, args []string) {
             errorCount++
         }
         
-        // Collect edge cases
+        // Collect edge cases with full file paths
         if edgeCase != "" {
-            filename := filepath.Base(file)
-            edgeCases[edgeCase] = append(edgeCases[edgeCase], filename)
+            edgeCases[edgeCase] = append(edgeCases[edgeCase], file)
         }
     }
     
@@ -127,11 +128,22 @@ func runBatch(cmd *cobra.Command, args []string) {
         fmt.Printf("Files with parsing edge cases: %d\n", totalEdgeCases)
         
         fmt.Printf("\n=== EDGE CASES ===\n")
-        for caseType, files := range edgeCases {
-            fmt.Printf("\n%s (%d files):\n", strings.ToUpper(strings.Replace(caseType, "_", " ", -1)), len(files))
-            for _, filename := range files {
+        for caseType, filePaths := range edgeCases {
+            fmt.Printf("\n%s (%d files):\n", strings.ToUpper(strings.Replace(caseType, "_", " ", -1)), len(filePaths))
+            for _, filePath := range filePaths {
+                filename := filepath.Base(filePath)
                 fmt.Printf("%s\n", filename)
             }
+        }
+    }
+    
+    // Generate HTML report if requested
+    if htmlReport != "" && totalEdgeCases > 0 {
+        err := generateHTMLReport(edgeCases, htmlReport)
+        if err != nil {
+            fmt.Printf("Error generating HTML report: %v\n", err)
+        } else {
+            fmt.Printf("\nHTML report generated: %s\n", htmlReport)
         }
     }
     
@@ -513,4 +525,150 @@ func cleanTitle(title string) string {
     title = strings.TrimSuffix(title, ".flac")
     
     return strings.TrimSpace(title)
+}
+
+// generateHTMLReport creates an HTML file showing edge cases with links to file locations
+func generateHTMLReport(edgeCases map[string][]string, outputPath string) error {
+    file, err := os.Create(outputPath)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    // Also generate a shell script for opening folders
+    scriptPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".sh"
+    err = generateOpenScript(edgeCases, scriptPath)
+    if err != nil {
+        fmt.Printf("Warning: Could not generate shell script: %v\n", err)
+    }
+    
+    // HTML header
+    html := `<!DOCTYPE html>
+<html>
+<head>
+    <title>Library Edge Cases</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .description { background-color: #f0f8ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .path { font-family: monospace; font-size: 0.9em; color: #666; word-break: break-all; cursor: pointer; }
+        .path:hover { background-color: #f0f0f0; }
+        .copy-hint { font-size: 0.8em; color: #888; font-style: italic; }
+        .script-info { background-color: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107; }
+    </style>
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                alert('Path copied to clipboard!');
+            }).catch(function() {
+                // Fallback for older browsers
+                prompt('Copy this path:', text);
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>Library Edge Cases</h1>
+    <div class="description">
+        <p>These files have naming patterns that couldn't be automatically parsed for artist and title extraction. 
+        They may need manual review or custom parsing rules.</p>
+        <p><strong>Edge Case Types:</strong></p>
+        <ul>
+            <li><strong>No Hyphens:</strong> Files without hyphen separators</li>
+            <li><strong>Three Hyphens:</strong> Ambiguous patterns requiring manual review</li>
+            <li><strong>Many Hyphens:</strong> Complex patterns with 5+ hyphens</li>
+        </ul>
+    </div>
+    <div class="script-info">
+        <strong>💡 Tip:</strong> A shell script <code>` + strings.TrimSuffix(filepath.Base(outputPath), filepath.Ext(outputPath)) + `.sh</code> has been generated alongside this HTML. 
+        Run it in Terminal to quickly open all edge case folders in Finder, or click on any path below to copy it to your clipboard.
+    </div>
+`
+    
+    // Add each edge case category
+    for caseType, filePaths := range edgeCases {
+        categoryTitle := strings.ToUpper(strings.Replace(caseType, "_", " ", -1))
+        html += fmt.Sprintf(`
+    <h2>%s (%d files)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>File Name</th>
+                <th>Path (Click to Copy)</th>
+            </tr>
+        </thead>
+        <tbody>
+`, categoryTitle, len(filePaths))
+        
+        for _, filePath := range filePaths {
+            filename := filepath.Base(filePath)
+            directory := filepath.Dir(filePath)
+            
+            html += fmt.Sprintf(`            <tr>
+                <td>%s</td>
+                <td class="path" onclick="copyToClipboard('%s')" title="Click to copy path">%s<br><span class="copy-hint">📋 Click to copy</span></td>
+            </tr>
+`, filename, directory, directory)
+        }
+        
+        html += `        </tbody>
+    </table>
+`
+    }
+    
+    // HTML footer
+    html += `
+</body>
+</html>`
+    
+    _, err = file.WriteString(html)
+    return err
+}
+
+// generateOpenScript creates a shell script to open all edge case directories
+func generateOpenScript(edgeCases map[string][]string, scriptPath string) error {
+    file, err := os.Create(scriptPath)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    script := `#!/bin/bash
+# Script to open all edge case directories in Finder
+# Generated by aiff-tagger
+
+echo "Opening edge case directories in Finder..."
+
+`
+    
+    // Collect unique directories
+    uniqueDirs := make(map[string]bool)
+    for _, filePaths := range edgeCases {
+        for _, filePath := range filePaths {
+            directory := filepath.Dir(filePath)
+            uniqueDirs[directory] = true
+        }
+    }
+    
+    // Add open commands for each unique directory
+    for directory := range uniqueDirs {
+        script += fmt.Sprintf("open \"%s\"\n", directory)
+    }
+    
+    script += `
+echo "Done! All directories should now be open in Finder."
+`
+    
+    _, err = file.WriteString(script)
+    if err != nil {
+        return err
+    }
+    
+    // Make the script executable
+    return os.Chmod(scriptPath, 0755)
 }
