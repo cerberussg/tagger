@@ -227,7 +227,7 @@ watch_dirs:
 - 🔄 **Daemon mode** - Background processing of new files
 - 🎚️ **Additional APIs** - Discogs, Last.fm integration for better coverage
 - 📊 **Collection statistics** - Detailed analytics about your music library
-- 🎧 Format expansion - MP3, FLAC, WAV, and other audio format support
+- 🎧 **Format expansion** - MP3, FLAC, WAV, and other audio format support
 
 ## Contributing
 
