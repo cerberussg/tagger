@@ -2,12 +2,16 @@
 package cmd
 
 import (
+    "context"
     "fmt"
     "os"
     "path/filepath"
     "regexp"
     "strings"
+    "time"
 
+    "github.com/cerberussg/tagger/pkg/enricher"
+    "github.com/cerberussg/tagger/pkg/enricher/musicbrainz"
     "github.com/dhowden/tag"
     "github.com/spf13/cobra"
     "github.com/spf13/viper"
@@ -17,12 +21,12 @@ var batchCmd = &cobra.Command{
     Use:   "batch <folder>",
     Short: "Process all AIFF files in a folder",
     Long: `Batch process all AIFF files in the specified folder, enriching
-metadata with record label, release date, and genre information.
+    metadata with record label, release date, and genre information.
 
-Examples:
-  tagger batch ~/Music/DnB
-  tagger batch ~/Downloads/new-releases --genre house --dry-run
-  tagger batch . --verbose`,
+    Examples:
+    aiff-tagger batch ~/Music/DnB
+    aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
+    aiff-tagger batch . --verbose`,
     Args: cobra.ExactArgs(1),
     Run:  runBatch,
 }
@@ -31,6 +35,7 @@ var (
     genreHint   string
     recursive   bool
     htmlReport  string
+    enrichData  bool
 )
 
 func init() {
@@ -39,6 +44,7 @@ func init() {
     batchCmd.Flags().StringVarP(&genreHint, "genre", "g", "", "genre hint for better API matching (dnb, house, breakbeat, etc.)")
     batchCmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "process subdirectories recursively")
     batchCmd.Flags().StringVar(&htmlReport, "html-report", "", "generate HTML report of edge cases (e.g., --html-report edge-cases.html)")
+    batchCmd.Flags().BoolVar(&enrichData, "enrich", false, "enable metadata enrichment via API (respects --dry-run)")
 }
 
 func runBatch(cmd *cobra.Command, args []string) {
@@ -64,28 +70,61 @@ func runBatch(cmd *cobra.Command, args []string) {
     if viper.GetBool("dry-run") {
         fmt.Println("DRY RUN: No files will be modified")
     }
+    if enrichData {
+        fmt.Println("ENRICHMENT: Enabled - will lookup missing metadata via MusicBrainz")
+    }
     
-    // Find AIFF files
-    files, err := findAIFFFiles(absPath, recursive)
+    // Initialize enricher if needed
+    var metadataEnricher *enricher.Enricher
+    if enrichData {
+        provider := musicbrainz.NewMusicBrainzProvider()
+        defer provider.Close()
+        
+        config := &enricher.EnricherConfig{
+            Strategy:       enricher.StrategyFirst,
+            MinConfidence:  0.7,
+            RequireLabel:   false,
+            RequestTimeout: 30 * time.Second,
+        }
+        
+        metadataEnricher = enricher.NewEnricher([]enricher.MetadataProvider{provider}, config)
+        defer metadataEnricher.Close()
+        
+        fmt.Printf("Enricher initialized with strategy: %s\n", config.Strategy)
+    }
+    
+    // Find audio files
+    files, err := findAudioFiles(absPath, recursive, getSupportedExtensions())
     if err != nil {
         fmt.Printf("Error scanning directory: %v\n", err)
         return
     }
 
     if len(files) == 0 {
-        fmt.Println("No AIFF files found in the specified directory")
+        fmt.Println("No supported audio files found in the specified directory")
         return
     }
 
-    fmt.Printf("Found %d AIFF files\n\n", len(files))
+    fmt.Printf("Found %d audio files\n\n", len(files))
     
     // Track what needs enrichment and edge cases
     var needsEnrichment int
     var hasLabel int
     var errorCount int
+    var enrichmentSuccess int
+    var enrichmentFailed int
     
     // Edge case tracking - store full paths instead of just filenames
     edgeCases := make(map[string][]string)
+    
+    // Context for API calls
+    ctx := context.Background()
+    if enrichData {
+        // Add timeout for the entire batch process
+        var cancel context.CancelFunc
+        ctx, cancel = context.WithTimeout(ctx, 10*time.Minute)
+        defer cancel()
+    }
     
     // Process each file
     for i, file := range files {
@@ -93,7 +132,7 @@ func runBatch(cmd *cobra.Command, args []string) {
             fmt.Printf("[%d/%d] %s\n", i+1, len(files), file)
         }
         
-        status, edgeCase := processFileWithEdgeCase(file)
+        status, edgeCase := processFileWithEdgeCase(file, metadataEnricher, ctx)
         switch status {
         case "needs_enrichment":
             needsEnrichment++
@@ -101,6 +140,10 @@ func runBatch(cmd *cobra.Command, args []string) {
             hasLabel++
         case "error":
             errorCount++
+        case "enriched":
+            enrichmentSuccess++
+        case "enrichment_failed":
+            enrichmentFailed++
         }
         
         // Collect edge cases with full file paths
@@ -116,6 +159,17 @@ func runBatch(cmd *cobra.Command, args []string) {
     fmt.Printf("Files needing enrichment: %d\n", needsEnrichment)
     if errorCount > 0 {
         fmt.Printf("Files with read errors: %d\n", errorCount)
+    }
+    
+    // Enrichment summary
+    if enrichData {
+        fmt.Printf("\n=== ENRICHMENT RESULTS ===\n")
+        fmt.Printf("Successfully enriched: %d\n", enrichmentSuccess)
+        fmt.Printf("Enrichment failed: %d\n", enrichmentFailed)
+        if enrichmentSuccess > 0 {
+            successRate := float64(enrichmentSuccess) / float64(enrichmentSuccess+enrichmentFailed) * 100
+            fmt.Printf("Success rate: %.1f%%\n", successRate)
+        }
     }
     
     // Edge cases summary
@@ -164,8 +218,20 @@ func isValidDirectory(path string) bool {
     return info.IsDir()
 }
 
-func findAIFFFiles(root string, recursive bool) ([]string, error) {
+// getSupportedExtensions returns the currently supported audio file extensions
+func getSupportedExtensions() []string {
+    return []string{".aiff", ".aif"} // TODO: Add .mp3, .flac, .wav when implemented
+}
+
+// findAudioFiles finds all supported audio files in a directory
+func findAudioFiles(root string, recursive bool, extensions []string) ([]string, error) {
     var files []string
+    
+    // Convert extensions to lowercase for comparison
+    supportedExts := make(map[string]bool)
+    for _, ext := range extensions {
+        supportedExts[strings.ToLower(ext)] = true
+    }
     
     if recursive {
         err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -179,7 +245,7 @@ func findAIFFFiles(root string, recursive bool) ([]string, error) {
                 }
                 
                 ext := strings.ToLower(filepath.Ext(path))
-                if ext == ".aiff" || ext == ".aif" {
+                if supportedExts[ext] {
                     files = append(files, path)
                 }
             }
@@ -187,38 +253,32 @@ func findAIFFFiles(root string, recursive bool) ([]string, error) {
         })
         return files, err
     } else {
-        // Non-recursive: just check immediate directory
-        pattern := filepath.Join(root, "*.aiff")
-        matches, err := filepath.Glob(pattern)
-        if err != nil {
-            return nil, err
-        }
-        
-        // Filter out AppleDouble files
-        for _, match := range matches {
-            filename := filepath.Base(match)
-            if !strings.HasPrefix(filename, "._") {
-                files = append(files, match)
+        // Non-recursive: check immediate directory for all supported extensions
+        for _, extension := range extensions {
+            pattern := filepath.Join(root, "*"+extension)
+            matches, err := filepath.Glob(pattern)
+            if err != nil {
+                continue // Skip this extension if glob fails
             }
-        }
-        
-        // Also check for .aif extension
-        aifPattern := filepath.Join(root, "*.aif")
-        aifMatches, err := filepath.Glob(aifPattern)
-        if err == nil {
-            for _, match := range aifMatches {
+            
+            // Filter out AppleDouble files
+            for _, match := range matches {
                 filename := filepath.Base(match)
                 if !strings.HasPrefix(filename, "._") {
                     files = append(files, match)
                 }
             }
         }
-        
         return files, nil
     }
 }
 
-func processFileWithEdgeCase(filePath string) (status, edgeCase string) {
+// Legacy function for backward compatibility - can be removed later
+func findAIFFFiles(root string, recursive bool) ([]string, error) {
+    return findAudioFiles(root, recursive, []string{".aiff", ".aif"})
+}
+
+func processFileWithEdgeCase(filePath string, metadataEnricher *enricher.Enricher, ctx context.Context) (status, edgeCase string) {
     if viper.GetBool("verbose") {
         fmt.Printf("  Reading metadata: %s\n", filePath)
     }
@@ -247,6 +307,11 @@ func processFileWithEdgeCase(filePath string) (status, edgeCase string) {
         }
         
         parsedArtist, parsedTitle, edgeType := parseFilenameWithEdgeCase(filePath)
+        
+        if viper.GetBool("verbose") {
+            fmt.Printf("  🔧 parseFilenameWithEdgeCase returned: artist='%s', title='%s'\n", parsedArtist, parsedTitle)
+        }
+        
         artist = parsedArtist
         title = parsedTitle
         parseEdgeCase = edgeType
@@ -310,6 +375,37 @@ func processFileWithEdgeCase(filePath string) (status, edgeCase string) {
         }
         return "has_label", parseEdgeCase
     } else {
+        // Try enrichment if enabled and we have basic info
+        if metadataEnricher != nil && hasBasicInfo {
+            if viper.GetBool("verbose") {
+                fmt.Printf("  🔍 Attempting enrichment for: %s - %s\n", artist, title)
+            }
+            
+            enrichedData, err := metadataEnricher.Lookup(ctx, artist, title)
+            if err != nil {
+                if viper.GetBool("verbose") {
+                    fmt.Printf("  ❌ Enrichment failed: %v\n", err)
+                }
+                return "enrichment_failed", parseEdgeCase
+            }
+            
+            if enrichedData != nil {
+                if viper.GetBool("verbose") {
+                    fmt.Printf("  🎉 Enrichment successful!\n")
+                    fmt.Printf("    Label: %s\n", enrichedData.Label)
+                    fmt.Printf("    Release Date: %s\n", enrichedData.ReleaseDate)
+                    fmt.Printf("    Confidence: %.2f\n", enrichedData.Confidence)
+                    if viper.GetBool("dry-run") {
+                        fmt.Printf("    📝 Would write metadata (dry-run mode)\n")
+                    } else {
+                        fmt.Printf("    📝 Writing metadata to file\n")
+                        // TODO: Implement actual metadata writing here
+                    }
+                }
+                return "enriched", parseEdgeCase
+            }
+        }
+        
         if viper.GetBool("verbose") {
             fmt.Printf("  📝 Ready for label enrichment via API\n")
         }
@@ -338,35 +434,51 @@ func parseFilenameWithEdgeCase(filePath string) (artist, title, edgeCase string)
     switch hyphenCount {
     case 0:
         // No hyphens - can't reliably parse
+        fmt.Printf("  🚨 SWITCH: case 0 - calling handleEdgeCase\n")
         artist, title = handleEdgeCase(name, "no_hyphens")
-        return artist, title, "no_hyphens"
+        edgeCase = "no_hyphens"
         
     case 1:
         // Artist - Title
+        if viper.GetBool("verbose") {
+            fmt.Printf("  🎯 Using parseOneHyphen for 1 hyphen case\n")
+        }
+        fmt.Printf("  🚨 SWITCH: case 1 - about to call parseOneHyphen\n")
         artist, title = parseOneHyphen(name)
-        return artist, title, ""
+        fmt.Printf("  🚨 SWITCH: case 1 - parseOneHyphen returned: artist='%s', title='%s'\n", artist, title)
+        edgeCase = ""
         
     case 2:
         // Artist - Album - Title
+        if viper.GetBool("verbose") {
+            fmt.Printf("  🎯 Using parseTwoHyphens for 2 hyphen case\n")
+        }
+        fmt.Printf("  🚨 SWITCH: case 2 - calling parseTwoHyphens\n")
         artist, title = parseTwoHyphens(name)
-        return artist, title, ""
+        edgeCase = ""
         
     case 3:
         // Edge case - needs manual review or special handling
         artist, title = handleEdgeCase(name, "three_hyphens")
-        return artist, title, "three_hyphens"
+        edgeCase = "three_hyphens"
         
     case 4:
         // Artist/Part - Album/Part - Title
         // Replace 1st and 3rd hyphens with slashes
         artist, title = parseFourHyphens(name)
-        return artist, title, ""
+        edgeCase = ""
         
     default:
         // 5+ hyphens - likely very complex, needs edge case handling
         artist, title = handleEdgeCase(name, "many_hyphens")
-        return artist, title, "many_hyphens"
+        edgeCase = "many_hyphens"
     }
+    
+    if viper.GetBool("verbose") {
+        fmt.Printf("  🎯 Final parsing result: artist='%s', title='%s', edgeCase='%s'\n", artist, title, edgeCase)
+    }
+    
+    return artist, title, edgeCase
 }
 
 // parseFilename attempts to extract artist and title from filename

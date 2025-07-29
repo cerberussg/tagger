@@ -62,9 +62,13 @@ func (m *MusicBrainzProvider) LookupWithHints(ctx context.Context, req *enricher
 		return nil, err
 	}
 
-	// Search for recordings first
+	// Search for recordings with release information included
 	recordings, err := m.searchRecordings(ctx, req)
 	if err != nil {
+		// Preserve context errors without wrapping
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("musicbrainz recording search failed: %w", err)
 	}
 
@@ -78,14 +82,8 @@ func (m *MusicBrainzProvider) LookupWithHints(ctx context.Context, req *enricher
 		return nil, enricher.ErrNotFound
 	}
 
-	// Get release information for the recording
-	releases, err := m.getRecordingReleases(ctx, bestRecording.ID)
-	if err != nil {
-		return nil, fmt.Errorf("musicbrainz release lookup failed: %w", err)
-	}
-
-	// Find the best release (prefer original releases)
-	bestRelease := m.findBestRelease(releases, req.PreferOriginalRelease)
+	// Find the best release from the recording's releases
+	bestRelease := m.findBestRelease(bestRecording.Releases, req.PreferOriginalRelease)
 	if bestRelease == nil {
 		return nil, enricher.ErrNotFound
 	}
@@ -155,11 +153,12 @@ func (m *MusicBrainzProvider) searchRecordings(ctx context.Context, req *enriche
 		query += fmt.Sprintf(` AND release:"%s"`, req.Album)
 	}
 
-	// Prepare URL
+	// Prepare URL with release information included
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("limit", strconv.Itoa(req.MaxResults))
 	params.Set("fmt", "json")
+	params.Set("inc", "releases+labels") // Include release and label info in the response
 	
 	searchURL := fmt.Sprintf("%s/recording?%s", baseURL, params.Encode())
 
@@ -174,6 +173,10 @@ func (m *MusicBrainzProvider) searchRecordings(ctx context.Context, req *enriche
 
 	resp, err := m.client.Do(httpReq)
 	if err != nil {
+		// Preserve context errors without wrapping
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("http request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -194,50 +197,6 @@ func (m *MusicBrainzProvider) searchRecordings(ctx context.Context, req *enriche
 	}
 
 	return searchResult.Recordings, nil
-}
-
-// getRecordingReleases fetches release information for a recording
-func (m *MusicBrainzProvider) getRecordingReleases(ctx context.Context, recordingID string) ([]Release, error) {
-	if err := m.waitForRateLimit(ctx); err != nil {
-		return nil, err
-	}
-
-	// Get releases for this recording
-	params := url.Values{}
-	params.Set("inc", "labels")
-	params.Set("fmt", "json")
-	
-	lookupURL := fmt.Sprintf("%s/recording/%s?%s", baseURL, recordingID, params.Encode())
-
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", lookupURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	
-	httpReq.Header.Set("User-Agent", m.userAgent)
-	httpReq.Header.Set("Accept", "application/json")
-
-	resp, err := m.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("musicbrainz API returned status %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var recording RecordingDetail
-	if err := json.Unmarshal(body, &recording); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
-	}
-
-	return recording.Releases, nil
 }
 
 // findBestRecordingMatch finds the recording that best matches the search criteria
