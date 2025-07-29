@@ -23,10 +23,17 @@ var batchCmd = &cobra.Command{
     Long: `Batch process all AIFF files in the specified folder, enriching
     metadata with record label, release date, and genre information.
 
+<<<<<<< HEAD
     Examples:
     aiff-tagger batch ~/Music/DnB
     aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
     aiff-tagger batch . --verbose`,
+=======
+Examples:
+  aiff-tagger batch ~/Music/DnB
+  aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
+  aiff-tagger batch . --verbose`,
+>>>>>>> 6ed74a4 (updated batcher to get close to where we left off)
     Args: cobra.ExactArgs(1),
     Run:  runBatch,
 }
