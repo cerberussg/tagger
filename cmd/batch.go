@@ -24,9 +24,9 @@ var batchCmd = &cobra.Command{
 metadata with record label, release date, and genre information.
 
 Examples:
-  aiff-tagger batch ~/Music/DnB
-  aiff-tagger batch ~/Downloads/new-releases --genre house --dry-run
-  aiff-tagger batch . --verbose`,
+  tagger batch ~/Music/DnB
+  tagger batch ~/Downloads/new-releases --genre house --dry-run
+  tagger batch . --verbose`,
     Args: cobra.ExactArgs(1),
     Run:  runBatch,
 }
@@ -307,11 +307,6 @@ func processFileWithEdgeCase(filePath string, metadataEnricher *enricher.Enriche
         }
         
         parsedArtist, parsedTitle, edgeType := parseFilenameWithEdgeCase(filePath)
-        
-        if viper.GetBool("verbose") {
-            fmt.Printf("  🔧 parseFilenameWithEdgeCase returned: artist='%s', title='%s'\n", parsedArtist, parsedTitle)
-        }
-        
         artist = parsedArtist
         title = parsedTitle
         parseEdgeCase = edgeType
@@ -413,6 +408,43 @@ func processFileWithEdgeCase(filePath string, metadataEnricher *enricher.Enriche
     }
 }
 
+// cleanFilename performs comprehensive cleanup of parsed artist and title
+func cleanFilename(text string) string {
+    if text == "" {
+        return text
+    }
+    
+    // Replace underscores with spaces
+    text = strings.ReplaceAll(text, "_", " ")
+    
+    // Replace + with & (common in artist collaborations)
+    text = strings.ReplaceAll(text, "+", " & ")
+    
+    // Remove track numbers from titles/artists
+    // Patterns like "01 Title", "1. Title", "A1 Title", "Title 01", "Title (01)"
+    patterns := []string{
+        `^\d+\.?\s+`,              // "01 " or "1. " at start
+        `^\d+\s*-\s*`,             // "01-" or "1 - " at start  
+        `^[A-Z]\d+\s+`,            // "A1 " or "B2 " at start
+        `^[A-Z]\d+\s*-\s*`,        // "A1-" or "B2 - " at start
+        `\s+\d+$`,                 // " 01" at end
+        `\s*\(\d+\)$`,             // " (01)" at end
+        `\s*-\s*\d+$`,             // " - 01" at end
+    }
+    
+    for _, pattern := range patterns {
+        re := regexp.MustCompile(pattern)
+        text = re.ReplaceAllString(text, "")
+    }
+    
+    // Clean up multiple spaces and trim
+    re := regexp.MustCompile(`\s+`)
+    text = re.ReplaceAllString(text, " ")
+    text = strings.TrimSpace(text)
+    
+    return text
+}
+
 // parseFilenameWithEdgeCase attempts to extract artist and title from filename
 // Also returns edge case type if encountered
 func parseFilenameWithEdgeCase(filePath string) (artist, title, edgeCase string) {
@@ -434,26 +466,16 @@ func parseFilenameWithEdgeCase(filePath string) (artist, title, edgeCase string)
     switch hyphenCount {
     case 0:
         // No hyphens - can't reliably parse
-        fmt.Printf("  🚨 SWITCH: case 0 - calling handleEdgeCase\n")
         artist, title = handleEdgeCase(name, "no_hyphens")
         edgeCase = "no_hyphens"
         
     case 1:
         // Artist - Title
-        if viper.GetBool("verbose") {
-            fmt.Printf("  🎯 Using parseOneHyphen for 1 hyphen case\n")
-        }
-        fmt.Printf("  🚨 SWITCH: case 1 - about to call parseOneHyphen\n")
         artist, title = parseOneHyphen(name)
-        fmt.Printf("  🚨 SWITCH: case 1 - parseOneHyphen returned: artist='%s', title='%s'\n", artist, title)
         edgeCase = ""
         
     case 2:
         // Artist - Album - Title
-        if viper.GetBool("verbose") {
-            fmt.Printf("  🎯 Using parseTwoHyphens for 2 hyphen case\n")
-        }
-        fmt.Printf("  🚨 SWITCH: case 2 - calling parseTwoHyphens\n")
         artist, title = parseTwoHyphens(name)
         edgeCase = ""
         
@@ -474,10 +496,6 @@ func parseFilenameWithEdgeCase(filePath string) (artist, title, edgeCase string)
         edgeCase = "many_hyphens"
     }
     
-    if viper.GetBool("verbose") {
-        fmt.Printf("  🎯 Final parsing result: artist='%s', title='%s', edgeCase='%s'\n", artist, title, edgeCase)
-    }
-    
     return artist, title, edgeCase
 }
 
@@ -491,8 +509,8 @@ func parseFilename(filePath string) (artist, title string) {
 func parseOneHyphen(name string) (artist, title string) {
     parts := strings.SplitN(name, "-", 2)
     if len(parts) == 2 {
-        artist = strings.TrimSpace(parts[0])
-        title = strings.TrimSpace(parts[1])
+        artist = cleanFilename(strings.TrimSpace(parts[0]))
+        title = cleanFilename(strings.TrimSpace(parts[1]))
         return artist, title
     }
     return "", ""
@@ -501,9 +519,9 @@ func parseOneHyphen(name string) (artist, title string) {
 func parseTwoHyphens(name string) (artist, title string) {
     parts := strings.SplitN(name, "-", 3)
     if len(parts) == 3 {
-        artist = strings.TrimSpace(parts[0])
+        artist = cleanFilename(strings.TrimSpace(parts[0]))
         // Skip album (parts[1]) for now - we just want artist/title
-        title = strings.TrimSpace(parts[2])
+        title = cleanFilename(strings.TrimSpace(parts[2]))
         return artist, title
     }
     return "", ""
@@ -513,16 +531,16 @@ func parseFourHyphens(name string) (artist, title string) {
     parts := strings.SplitN(name, "-", 5)
     if len(parts) == 5 {
         // Reconstruct artist: parts[0] / parts[1]
-        artistPart1 := strings.TrimSpace(parts[0])
-        artistPart2 := strings.TrimSpace(parts[1])
+        artistPart1 := cleanFilename(strings.TrimSpace(parts[0]))
+        artistPart2 := cleanFilename(strings.TrimSpace(parts[1]))
         artist = artistPart1 + "/" + artistPart2
         
         // Skip album parts[2]/parts[3] 
-        title = strings.TrimSpace(parts[4])
+        title = cleanFilename(strings.TrimSpace(parts[4]))
         
         if viper.GetBool("verbose") {
-            albumPart1 := strings.TrimSpace(parts[2])
-            albumPart2 := strings.TrimSpace(parts[3])
+            albumPart1 := cleanFilename(strings.TrimSpace(parts[2]))
+            albumPart2 := cleanFilename(strings.TrimSpace(parts[3]))
             album := albumPart1 + "/" + albumPart2
             fmt.Printf("  📀 Detected album: %s\n", album)
         }
@@ -542,19 +560,25 @@ func handleEdgeCase(name string, caseType string) (artist, title string) {
     switch caseType {
     case "no_hyphens":
         // Maybe it's "Artist Title" with spaces?
-        return trySpaceSeparated(name)
+        artist, title = trySpaceSeparated(name)
         
     case "three_hyphens":
         // Try treating as Artist - Album - Extra - Title
-        return tryThreeHyphenFallback(name)
+        artist, title = tryThreeHyphenFallback(name)
         
     case "many_hyphens":
         // Try to find the most likely artist-title split
-        return tryManyHyphenFallback(name)
+        artist, title = tryManyHyphenFallback(name)
         
     default:
         return "", ""
     }
+    
+    // Apply final cleaning to results from edge case handling
+    artist = cleanFilename(artist)
+    title = cleanFilename(title)
+    
+    return artist, title
 }
 
 func trySpaceSeparated(name string) (artist, title string) {
@@ -606,8 +630,11 @@ func tryManyHyphenFallback(name string) (artist, title string) {
     return "", ""
 }
 
-// cleanTrackPrefix removes common prefixes from the entire filename
+// cleanTrackPrefix removes common prefixes from the entire filename (updated)
 func cleanTrackPrefix(name string) string {
+    // First replace underscores with spaces for better pattern matching
+    name = strings.ReplaceAll(name, "_", " ")
+    
     // Remove track numbers like "01 ", "1. ", "A1 ", "B2 ", etc.
     patterns := []string{
         `^\d+\.?\s+`,        // "01 " or "1. "
